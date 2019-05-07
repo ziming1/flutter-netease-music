@@ -40,5 +40,7 @@
 
         <service android:name=".player.service.QuietPlayerService" />
 
+        <service android:name=".service.MusicPlayerService" />
+
     </application>
 </manifest>

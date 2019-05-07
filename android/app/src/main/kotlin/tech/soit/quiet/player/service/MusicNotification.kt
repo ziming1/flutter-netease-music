@@ -6,7 +6,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Build
 import android.support.annotation.VisibleForTesting
-import android.support.v4.app.NotificationCompat
+import androidx.core.app.NotificationCompat
 import com.google.android.exoplayer2.Player
 import tech.soit.quiet.AppContext
 import tech.soit.quiet.MainActivity

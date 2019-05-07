@@ -3,7 +3,9 @@ package tech.soit.quiet.plugin
 import io.flutter.plugin.common.PluginRegistry
 
 object PluginRegistrant {
+
     fun registerWith(registry: PluginRegistry) {
+
         if (alreadyRegisteredWith(registry)) {
             return
         }
