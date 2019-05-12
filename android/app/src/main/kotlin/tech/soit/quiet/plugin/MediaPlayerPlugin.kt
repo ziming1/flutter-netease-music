@@ -29,13 +29,14 @@ class MediaPlayerPlugin(
             val channel = MethodChannel(registrar.messenger(), NAME)
             val plugin = MediaPlayerPlugin(channel, registrar.context())
             channel.setMethodCallHandler(plugin)
+            registrar.publish(plugin)
         }
     }
 
     private val connectCallback = object : MediaBrowserCompat.ConnectionCallback() {
 
         override fun onConnected() {
-            log { "connected" }
+            log { "connected , ${mediaBrowser.sessionToken}" }
             mediaBrowser.subscribe(mediaBrowser.root, mediaSubscription)
             mediaController?.unregisterCallback(controllerCallback)
             mediaController = MediaControllerCompat(context, mediaBrowser.sessionToken).apply {
@@ -79,7 +80,7 @@ class MediaPlayerPlugin(
             "skipToPrevious" -> controls.skipToPrevious()
             "pause" -> controls.pause()
             "play" -> controls.play()
-            "playWithQinDing" -> controls.playFromMediaId(call.argument("id"), null)
+            "playWithQinDing" -> controls.playFromMediaId(call.argument<Any>("id").toString(), null)
             "seekTo" -> controls.seekTo(call.arguments as Long)
             "setShuffleMode" -> controls.setShuffleMode(call.arguments as Int)
             "setRepeatMode" -> controls.setRepeatMode(call.arguments as Int)
@@ -104,9 +105,16 @@ class MediaPlayerPlugin(
                 val items = call.arguments<List<Map<*, *>>>().map { it.toMediaMetadataCompat() }
                 val bundle = Bundle(1)
                 bundle.putParcelableArrayList("playlist", ArrayList(items))
-                controls.sendCustomAction("setPlaylist", bundle)
+                mediaBrowser.sendCustomAction("setPlaylist", bundle, object : MediaBrowserCompat.CustomActionCallback() {
+                    override fun onResult(action: String?, extras: Bundle?, resultData: Bundle?) {
+                        log { "$action : $resultData" }
+                    }
+                })
             }
-            else -> result.notImplemented()
+            else -> {
+                result.notImplemented()
+                return
+            }
         }
         result.success(if (r == Unit) null else r)
     }
@@ -120,18 +128,21 @@ class MediaPlayerPlugin(
     }
 
     fun connect() {
+        log { "connect" }
         mediaBrowser.connect()
     }
 
     private val mediaSubscription = object : MediaBrowserCompat.SubscriptionCallback() {
 
-        override fun onChildrenLoaded(parentId: String, children: MutableList<MediaBrowserCompat.MediaItem>, options: Bundle) {
+        override fun onChildrenLoaded(parentId: String, children: MutableList<MediaBrowserCompat.MediaItem>) {
+            val musicList = children.map { it.description.toMap() }
 
+            log { "music list : $musicList" }
+            channel.invokeMethod("onPlaylistLoaded", musicList)
         }
 
-
         override fun onError(parentId: String) {
-
+            log { "error to load $parentId" }
         }
     }
 
@@ -156,7 +167,6 @@ class MediaPlayerPlugin(
         override fun onShuffleModeChanged(shuffleMode: Int) {
             channel.invokeMethod("onShuffleModeChanged", shuffleMode)
         }
-
 
         override fun onQueueChanged(queue: MutableList<MediaSessionCompat.QueueItem>?) {
             channel.invokeMethod("onQueueChanged", queue?.map { it.description.toMap() })

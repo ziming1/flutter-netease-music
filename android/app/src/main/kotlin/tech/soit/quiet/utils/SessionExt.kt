@@ -1,5 +1,6 @@
 package tech.soit.quiet.utils
 
+import android.net.Uri
 import android.os.Bundle
 import android.support.v4.media.MediaBrowserCompat
 import android.support.v4.media.MediaDescriptionCompat
@@ -27,9 +28,10 @@ fun PlaybackStateCompat.toMap(): MutableMap<String, *> {
 
 fun Map<*, *>.toMediaMetadataCompat(): MediaDescriptionCompat {
     return MediaDescriptionCompat.Builder()
-            .setMediaId(get("id") as String?)
+            .setMediaId(get("id").toString())
             .setTitle(get("title") as CharSequence?)
             .setSubtitle(get("subtitle") as CharSequence?)
+            .setMediaUri((get("url") as String?)?.let { Uri.parse(it) })
             .setExtras(toBundle())
             .build()
 }
@@ -48,7 +50,12 @@ fun MediaDescriptionCompat.toMediaItem(): MediaBrowserCompat.MediaItem {
 
 private fun Bundle.toMap(): Map<String, Any?> {
     return keySet().map {
-        it to get(it)
+        val obj = get(it)
+        if (obj is Bundle) {
+            it to obj.toMap()
+        } else {
+            it to get(it)
+        }
     }.toMap()
 }
 

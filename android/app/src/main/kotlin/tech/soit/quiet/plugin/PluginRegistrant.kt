@@ -5,10 +5,10 @@ import io.flutter.plugin.common.PluginRegistry
 object PluginRegistrant {
 
     fun registerWith(registry: PluginRegistry) {
-
         if (alreadyRegisteredWith(registry)) {
             return
         }
+        MediaPlayerPlugin.registerWith(registry.registrarFor(MediaPlayerPlugin::class.java.canonicalName))
     }
 
     private fun alreadyRegisteredWith(registry: PluginRegistry): Boolean {

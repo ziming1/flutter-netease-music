@@ -4,8 +4,11 @@ import 'package:quiet/material/app.dart';
 import 'component/netease/netease.dart';
 import 'component/theme/theme.dart';
 import 'part/part.dart';
+import 'player2.dart';
 
-void main() => runApp(MyApp());
+void main() => runApp(MaterialApp(
+      home: Scaffold(body: SafeArea(child: Play2Test())),
+    ));
 
 class MyApp extends StatelessWidget {
   final QuietTheme _theme = QuietTheme();
