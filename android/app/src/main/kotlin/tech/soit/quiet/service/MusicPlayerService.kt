@@ -58,6 +58,8 @@ class MusicPlayerService : MediaBrowserServiceCompat() {
 
     private val notificationManager by lazy { NotificationManagerCompat.from(this) }
 
+    private lateinit var mediaController: MediaControllerCompat
+
     private val playerPersistence by lazy { PlayerPersistence() }
 
     private var isForegroundService = false
@@ -84,9 +86,8 @@ class MusicPlayerService : MediaBrowserServiceCompat() {
         log { "" }
 
         sessionToken = mediaSession.sessionToken
-
-        MediaControllerCompat(this, mediaSession).apply {
-            registerCallback(MediaControllerCallback(this))
+        mediaController = MediaControllerCompat(this, mediaSession).apply {
+            registerCallback(MediaControllerCallback())
         }
 
         val dataSourceFactory = DefaultDataSourceFactory(
@@ -146,7 +147,6 @@ class MusicPlayerService : MediaBrowserServiceCompat() {
 
 
     private fun setPlaylist(extras: Bundle?, result: Result<Bundle>) {
-        log { "extras : $extras" }
         if (extras == null) {
             result.sendError(null)
             return
@@ -159,7 +159,6 @@ class MusicPlayerService : MediaBrowserServiceCompat() {
         if (medias != null) {
             playList.addAll(medias.map { it.toMediaItem() })
         }
-
         notifyChildrenChanged(ROOT)
         result.sendResult(null)
     }
@@ -185,17 +184,11 @@ class MusicPlayerService : MediaBrowserServiceCompat() {
         return BrowserRoot(ROOT, null)
     }
 
-    private inner class MediaControllerCallback(
-            private val mediaController: MediaControllerCompat
-    ) : MediaControllerCompat.Callback() {
+    private inner class MediaControllerCallback : MediaControllerCompat.Callback() {
 
         override fun onMetadataChanged(metadata: MediaMetadataCompat?) {
             log { "onMetadataChanged : $metadata" }
             mediaController.playbackState?.let { updateNotification(it) }
-        }
-
-        override fun onAudioInfoChanged(info: MediaControllerCompat.PlaybackInfo?) {
-            super.onAudioInfoChanged(info)
         }
 
         override fun onPlaybackStateChanged(state: PlaybackStateCompat?) {

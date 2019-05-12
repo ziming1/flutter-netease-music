@@ -6,7 +6,6 @@ import io.flutter.app.FlutterActivity
 import io.flutter.plugins.GeneratedPluginRegistrant
 import tech.soit.quiet.plugin.MediaPlayerPlugin
 import tech.soit.quiet.plugin.PluginRegistrant
-import tech.soit.quiet.service.QuietPlayerChannel
 
 class MainActivity : FlutterActivity() {
 
@@ -17,8 +16,6 @@ class MainActivity : FlutterActivity() {
         const val DESTINATION_PLAYING_PAGE = "action_playing_page"
 
     }
-
-    private lateinit var playerChannel: QuietPlayerChannel
 
 
     private val mediaPlayerPlugin: MediaPlayerPlugin
@@ -33,7 +30,6 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
-        playerChannel.destroy()
         mediaPlayerPlugin.destroy()
         super.onDestroy()
     }

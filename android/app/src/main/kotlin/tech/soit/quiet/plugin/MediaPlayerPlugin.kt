@@ -105,11 +105,7 @@ class MediaPlayerPlugin(
                 val items = call.arguments<List<Map<*, *>>>().map { it.toMediaMetadataCompat() }
                 val bundle = Bundle(1)
                 bundle.putParcelableArrayList("playlist", ArrayList(items))
-                mediaBrowser.sendCustomAction("setPlaylist", bundle, object : MediaBrowserCompat.CustomActionCallback() {
-                    override fun onResult(action: String?, extras: Bundle?, resultData: Bundle?) {
-                        log { "$action : $resultData" }
-                    }
-                })
+                mediaBrowser.sendCustomAction("setPlaylist", bundle,null)
             }
             else -> {
                 result.notImplemented()
