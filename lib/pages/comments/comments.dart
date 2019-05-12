@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:async/async.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:overlay_support/overlay_support.dart';
 import 'package:quiet/component/utils/utils.dart';
 import 'package:quiet/model/playlist_detail.dart';
 import 'package:quiet/pages/comments/page_comment.dart';
@@ -107,11 +108,11 @@ class CommentList extends Model {
       return;
     }
 
-    _autoLoadOperation = CancelableOperation.fromFuture(
+    _autoLoadOperation = CancelableOperation<Result<Map>>.fromFuture(
         neteaseRepository.getComments(threadId, offset: comments.length))
-      ..value.then((result) {
-        _autoLoadOperation = null;
-        if (result["code"] == 200) {
+      ..value.then((r) {
+        if (r is ValueResult) {
+          final result = r.asValue.value;
           _more = result["more"];
           if (comments.isEmpty) {
             total = result['total'];
@@ -127,8 +128,7 @@ class CommentList extends Model {
         } else {
           //error handle
         }
-      }).catchError((e) {
-        debugPrint(e.toString());
+      }).whenComplete(() {
         _autoLoadOperation = null;
       });
   }

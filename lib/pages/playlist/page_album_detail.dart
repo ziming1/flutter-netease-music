@@ -7,7 +7,7 @@ import 'package:quiet/repository/netease.dart';
 
 import 'music_list.dart';
 import 'page_playlist_detail_selection.dart';
-import 'flexible_app_bar.dart';
+import 'package:quiet/material/flexible_app_bar.dart';
 
 class AlbumDetailPage extends StatefulWidget {
   final int albumId;
@@ -27,7 +27,6 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     return Scaffold(
       body: Loader<Map>(
           loadTask: () => neteaseRepository.albumDetail(widget.albumId),
-          resultVerify: neteaseRepository.responseVerify,
           builder: (context, result) {
             return _AlbumBody(
               album: result["album"],

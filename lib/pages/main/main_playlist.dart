@@ -43,17 +43,16 @@ class _MainPlaylistState extends State<MainPlaylistPage>
             key: _loaderKey,
             initialData: neteaseLocalData.getUserPlaylist(userId),
             loadTask: () => neteaseRepository.userPlaylist(userId),
-            resultVerify: simpleLoaderResultVerify((v) => v != null),
             loadingBuilder: (context) {
               _indicatorKey.currentState.show();
               return ListView(children: [
                 _PinnedHeader(),
               ]);
             },
-            failedWidgetBuilder: (context, result, msg) {
+            errorBuilder: (context, result) {
               return ListView(children: [
                 _PinnedHeader(),
-                Loader.buildSimpleFailedWidget(context, result, msg),
+                Loader.buildSimpleFailedWidget(context, result),
               ]);
             },
             builder: (context, result) {
@@ -332,7 +331,7 @@ class _ItemPlaylist extends StatelessWidget {
             Padding(padding: EdgeInsets.only(left: 16)),
             Hero(
               tag: playlist.heroTag,
-              child: SizedBox(
+              child: Container(
                 child: ClipRRect(
                   borderRadius: BorderRadius.all(Radius.circular(4)),
                   child: FadeInImage(
@@ -341,10 +340,10 @@ class _ItemPlaylist extends StatelessWidget {
                     fadeInDuration: Duration.zero,
                     fadeOutDuration: Duration.zero,
                     fit: BoxFit.cover,
+                    height: 50,
+                    width: 50,
                   ),
                 ),
-                height: 50,
-                width: 50,
               ),
             ),
             Padding(padding: EdgeInsets.only(left: 10)),

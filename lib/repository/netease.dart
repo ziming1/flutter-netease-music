@@ -1,19 +1,21 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 
-import 'package:cookie_jar/cookie_jar.dart';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:quiet/model/playlist_detail.dart';
 import 'package:quiet/pages/comments/page_comment.dart';
 import 'package:quiet/part/part.dart';
 
 import 'netease_local_data.dart';
+import 'network/netease_request.dart';
+
+export 'package:async/async.dart' show Result;
+export 'package:async/async.dart' show ValueResult;
+export 'package:async/async.dart' show ErrorResult;
 
 export 'netease_image.dart';
 export 'netease_local_data.dart';
@@ -43,74 +45,33 @@ const _CODE_SUCCESS = 200;
 
 const _CODE_NEED_LOGIN = 301;
 
+///map a result to any other
+Result<R> _map<T, R>(Result<T> source, R f(T t)) {
+  if (source.isError) return source.asError;
+  return Result.value(f(source.asValue.value));
+}
+
 class NeteaseRepository {
-  ///to verify api response is success
-  final TaskResultVerify responseVerify = (dynamic result) {
-    if (result == null) {
-      return VerifyValue.errorMsg("请求失败");
-    }
-    if (result["code"] != _CODE_SUCCESS) {
-      return VerifyValue.errorMsg(
-          "code:${result["code"]} \nmsg:${result["msg"]}");
-    }
-    return VerifyValue.success(result);
-  };
-
-  static const String _BASE_URL = "http://music.163.com";
-
   NeteaseRepository._private();
 
-  Dio _dio;
-
-  PersistCookieJar _cookieJar;
-
-  Future<Dio> get dio async {
-    if (_dio != null) {
-      return _dio;
-    }
-    var path = (await getApplicationDocumentsDirectory()).path + "/.cookies/";
-    _cookieJar = PersistCookieJar(dir: path);
-
-    _dio = Dio(BaseOptions(
-        method: "POST",
-        baseUrl: _BASE_URL,
-        headers: _header,
-        responseType: ResponseType.json,
-        contentType: ContentType.parse("application/x-www-form-urlencoded")));
-
-    _dio.interceptors
-      ..add(CookieManager(_cookieJar))
-      ..add(InterceptorsWrapper(onRequest: (options) {
-        debugPrint("request header :${options.headers}");
-//      debugPrint("request cookie :${options.data}");
-        return options;
-      }));
-
-    return _dio;
-  }
-
   ///使用手机号码登录
-  Future<Map> login(String phone, String password) async {
+  Future<Result<Map>> login(String phone, String password) async {
     var request = {
       "phone": phone,
       "password": md5.convert(utf8.encode(password)).toString()
     };
     var result = await doRequest("/weapi/login/cellphone", request,
-        options: Options(headers: {"User-Agent": _chooseUserAgent(ua: "pc")}));
-
-    if (result["code"] == 200) {
-      return result;
-    }
-    throw '登陆失败';
+        options: Options(headers: {"User-Agent": chooseUserAgent(ua: "pc")}));
+    return result;
   }
 
   ///刷新登陆状态
   ///返回结果：true 正常登陆状态
   ///         false 需要重新登陆
   Future<bool> refreshLogin() async {
-    final result = await doRequest(
+    final result = await NeteaseRequestService().doRequest(
         'https://music.163.com/weapi/login/token/refresh', {},
-        options: Options(headers: {"User-Agent": _chooseUserAgent(ua: "pc")}));
+        options: Options(headers: {"User-Agent": chooseUserAgent(ua: "pc")}));
     if (result['code'] == _CODE_SUCCESS) {
       return true;
     } else if (result['code'] == _CODE_NEED_LOGIN) {
@@ -121,50 +82,48 @@ class NeteaseRepository {
 
   ///登出,删除本地cookie信息
   Future<void> logout() async {
-    //删除cookie
-    _cookieJar.delete(Uri.parse(_BASE_URL));
+    NeteaseRequestService().clearCookie();
   }
 
   ///根据用户ID获取歌单
   ///PlayListDetail 中的 tracks 都是空数据
-  Future<List<PlaylistDetail>> userPlaylist(int userId,
+  Future<Result<List<PlaylistDetail>>> userPlaylist(int userId,
       [int offset = 0, int limit = 1000]) async {
     final response = await doRequest("/weapi/user/playlist",
         {"offset": offset, "uid": userId, "limit": limit, "csrf_token": ""});
-    if (responseVerify(response).isSuccess) {
-      final list = (response["playlist"] as List)
+
+    return _map(response, (Map result) {
+      final list = (result["playlist"] as List)
           .cast<Map>()
           .map((e) => PlaylistDetail.fromJson(e))
           .toList();
       neteaseLocalData.updateUserPlaylist(userId, list);
       return list;
-    }
-    return null;
+    });
   }
 
   ///create new playlist by [name]
-  Future<PlaylistDetail> createPlaylist(String name) async {
+  Future<Result<PlaylistDetail>> createPlaylist(String name) async {
     final response = await doRequest(
         "https://music.163.com/weapi/playlist/create", {"name": name},
-        options: Options(headers: {"User-Agent": _chooseUserAgent(ua: "pc")}));
-    if (responseVerify(response).isSuccess) {
-      return PlaylistDetail.fromJson(response["playlist"]);
-    }
-    return Future.error(response["msg"] ?? "error:${response["code"]}");
+        options: Options(headers: {"User-Agent": chooseUserAgent(ua: "pc")}));
+    return _map(response, (result) {
+      return PlaylistDetail.fromJson(result["playlist"]);
+    });
   }
 
   ///根据歌单id获取歌单详情，包括歌曲
-  Future<PlaylistDetail> playlistDetail(int id) async {
+  Future<Result<PlaylistDetail>> playlistDetail(int id) async {
     final response = await doRequest(
         "https://music.163.com/weapi/v3/playlist/detail",
         {"id": "$id", "n": 100000, "s": 8},
-        type: EncryptType.linux);
-    if (responseVerify(response).isSuccess) {
-      final result = PlaylistDetail.fromJson(response["playlist"]);
+        crypto: Crypto.linux);
+
+    return _map(response, (t) {
+      final result = PlaylistDetail.fromJson(t["playlist"]);
       neteaseLocalData.updatePlaylistDetail(result);
       return result;
-    }
-    return null;
+    });
   }
 
   ///id 歌单id
@@ -173,28 +132,27 @@ class NeteaseRepository {
     String action = subscribe ? "subscribe" : "unsubscribe";
     final response = await doRequest(
         "https://music.163.com/weapi/playlist/$action", {"id": id});
-    return responseVerify(response).isSuccess;
+    return response.isValue;
   }
 
   ///根据专辑详细信息
-  Future<Map> albumDetail(int id) async {
+  Future<Result<Map>> albumDetail(int id) async {
     return doRequest("https://music.163.com/weapi/v1/album/$id", {});
   }
 
   ///推荐歌单
-  Future<Map<String, Object>> personalizedPlaylist(
-      {int limit = 30, int offset = 0}) {
+  Future<Result<Map>> personalizedPlaylist({int limit = 30, int offset = 0}) {
     return doRequest("/weapi/personalized/playlist",
         {"limit": limit, "offset": offset, "total": true, "n": 1000});
   }
 
   /// 推荐的新歌（10首）
-  Future<Map<String, Object>> personalizedNewSong() {
+  Future<Result<Map>> personalizedNewSong() {
     return doRequest("/weapi/personalized/newsong", {"type": "recommend"});
   }
 
   /// 榜单摘要
-  Future<Map<String, Object>> topListDetail() async {
+  Future<Result<Map>> topListDetail() async {
     return doRequest("/weapi/toplist/detail", {
       "offset": 0,
       "total": true,
@@ -203,7 +161,7 @@ class NeteaseRepository {
   }
 
   ///推荐歌曲
-  Future<Map<String, Object>> recommendSongs() async {
+  Future<Result<Map>> recommendSongs() async {
     return doRequest("/weapi/v1/discovery/recommend/songs", {});
   }
 
@@ -218,11 +176,11 @@ class NeteaseRepository {
     }
     var result = await doRequest(
         'https://music.163.com/weapi/song/lyric?lv=-1&kv=-1&tv=-1', {"id": id},
-        type: EncryptType.linux);
-    if (!responseVerify(result).isSuccess) {
-      return Future.error(result["msg"]);
+        crypto: Crypto.linux);
+    if (result.isError) {
+      return Future.error(result.asError.error);
     }
-    Map lyc = result["lrc"];
+    Map lyc = result.asValue.value["lrc"];
     if (lyc == null) {
       return null;
     }
@@ -233,23 +191,21 @@ class NeteaseRepository {
   }
 
   ///获取搜索热词
-  Future<List<String>> searchHotWords() async {
+  Future<Result<List<String>>> searchHotWords() async {
     var result = await doRequest(
         "https://music.163.com/weapi/search/hot", {"type": 1111},
         options:
-            Options(headers: {"User-Agent": _chooseUserAgent(ua: "mobile")}));
-    if (result["code"] != 200) {
-      return null;
-    } else {
-      List hots = (result["result"] as Map)["hots"];
+            Options(headers: {"User-Agent": chooseUserAgent(ua: "mobile")}));
+    return _map(result, (t) {
+      List hots = (t["result"] as Map)["hots"];
       return hots.cast<Map<String, dynamic>>().map((map) {
         return map["first"] as String;
       }).toList();
-    }
+    });
   }
 
   ///search by keyword
-  Future<Map<String, dynamic>> search(String keyword, NeteaseSearchType type,
+  Future<Result<Map>> search(String keyword, NeteaseSearchType type,
       {int limit = 20, int offset = 0}) {
     return doRequest("https://music.163.com/weapi/search/get",
         {"s": keyword, "type": type.type, "limit": limit, "offset": offset});
@@ -257,26 +213,24 @@ class NeteaseRepository {
 
   ///搜索建议
   ///返回搜索建议列表，结果一定不会为null
-  Future<List<String>> searchSuggest(String keyword) async {
+  Future<Result<List<String>>> searchSuggest(String keyword) async {
     if (keyword == null || keyword.isEmpty || keyword.trim().isEmpty) {
-      return [];
+      return Result.value(const []);
     }
     keyword = keyword.trim();
-    try {
-      final response = await doRequest(
-          "https://music.163.com/weapi/search/suggest/keyword", {"s": keyword});
-      if (!responseVerify(response).isSuccess) {
-        return [];
-      }
-      List<Map> match = ((response["result"]["allMatch"]) as List)?.cast();
+    final response = await doRequest(
+        "https://music.163.com/weapi/search/suggest/keyword", {"s": keyword});
+    if (response.isError) {
+      return Result.value(const []);
+    }
+    return _map(response, (t) {
+      List<Map> match =
+          ((response.asValue.value["result"]["allMatch"]) as List)?.cast();
       if (match == null) {
         return [];
       }
       return match.map((m) => m["keyword"]).cast<String>().toList();
-    } catch (e) {
-      debugPrint(e.toString());
-      return [];
-    }
+    });
   }
 
   ///check music is available
@@ -284,17 +238,17 @@ class NeteaseRepository {
     var result = await doRequest(
         "https://music.163.com/weapi/song/enhance/player/url",
         {"ids": "[$id]", "br": 999000});
-    return result["code"] == 200 && result["data"][0]["code"] == 200;
+    return result.isValue && result.asValue.value["data"][0]["code"] == 200;
   }
 
   ///fetch music detail from id
-  Future<Map<String, dynamic>> getMusicDetail(int id) async {
+  Future<Result<Map<String, Object>>> getMusicDetail(int id) async {
     final result = await doRequest("https://music.163.com/weapi/v3/song/detail",
         {"ids": "[$id]", "c": '[{"id":$id}]'});
-    if (result["code"] == 200) {
+
+    return _map(result, (result) {
       return result["songs"][0];
-    }
-    return null;
+    });
   }
 
   ///edit playlist tracks
@@ -311,7 +265,7 @@ class NeteaseRepository {
       "pid": playlistId,
       "trackIds": "[${musicIds.join(",")}]"
     });
-    return responseVerify(result).isSuccess;
+    return result.isValue;
   }
 
   ///update playlist name and description
@@ -326,24 +280,24 @@ class NeteaseRepository {
           "/api/playlist/update/name":
               json.encode({"id": playlist.id, "name": playlist.name}),
         },
-        options: Options(headers: {"User-Agent": _chooseUserAgent(ua: "pc")}));
+        options: Options(headers: {"User-Agent": chooseUserAgent(ua: "pc")}));
     debugPrint("response :$response");
-    if (!responseVerify(response).isSuccess) {
-      bool success = response["/api/playlist/desc/update"]["code"] == 200 &&
-//          response["/api/playlist/tags/update"]["code"] == 200 &&
-          response["/api/playlist/update/name"]["code"] == 200;
+
+    return _map(response, (t) {
+      bool success = t["/api/playlist/desc/update"]["code"] == 200 &&
+//          t["/api/playlist/tags/update"]["code"] == 200 &&
+          t["/api/playlist/update/name"]["code"] == 200;
       return success;
-    }
-    return Future.error(response["msg"] ?? "失败");
+    }).isValue;
   }
 
   ///获取歌手信息和单曲
-  Future<Map> artistDetail(int artistId) async {
+  Future<Result<Map>> artistDetail(int artistId) async {
     return doRequest("https://music.163.com/weapi/v1/artist/$artistId", {});
   }
 
   ///获取歌手的专辑列表
-  Future<Map> artistAlbums(int artistId,
+  Future<Result<Map>> artistAlbums(int artistId,
       {int limit = 10, int offset = 0}) async {
     return doRequest("https://music.163.com/weapi/artist/albums/$artistId", {
       "limit": limit,
@@ -353,7 +307,8 @@ class NeteaseRepository {
   }
 
   ///获取歌手的MV列表
-  Future<Map> artistMvs(int artistId, {int limit = 20, int offset = 0}) async {
+  Future<Result<Map>> artistMvs(int artistId,
+      {int limit = 20, int offset = 0}) async {
     return doRequest("https://music.163.com/weapi/artist/mvs", {
       "artistId": artistId,
       "limit": limit,
@@ -363,15 +318,15 @@ class NeteaseRepository {
   }
 
   ///获取歌手介绍
-  Future<Map> artistDesc(int artistId) async {
+  Future<Result<Map>> artistDesc(int artistId) async {
     return doRequest(
         "https://music.163.com/weapi/artist/introduction", {"id": artistId});
   }
 
   ///get comments
-  Future<Map> getComments(CommentThreadId commentThread,
+  Future<Result<Map>> getComments(CommentThreadId commentThread,
       {int limit = 20, int offset = 0}) {
-    return neteaseRepository.doRequest(
+    return doRequest(
         "https://music.163.com/weapi/v1/resource/comments/${commentThread.threadId}",
         {"rid": commentThread.id, "limit": limit, "offset": offset},
         cookies: [Cookie("os", "pc")]);
@@ -379,193 +334,87 @@ class NeteaseRepository {
 
   ///给歌曲加红心
   Future<bool> like(int musicId, bool like) async {
-    try {
-      final response = await doRequest(
-          "https://music.163.com/weapi/radio/like?alg=itembased&trackId=$musicId&like=$like&time=25",
-          {"trackId": musicId, "like": like});
-      return responseVerify(response).isSuccess;
-    } catch (e) {
-      return false;
-    }
+    final response = await doRequest(
+        "https://music.163.com/weapi/radio/like?alg=itembased&trackId=$musicId&like=$like&time=25",
+        {"trackId": musicId, "like": like});
+
+    return response.isValue;
   }
 
   ///获取用户红心歌曲id列表
-  Future<List<int>> likedList(int userId) async {
+  Future<Result<List<int>>> likedList(int userId) async {
     final response = await doRequest(
         "https://music.163.com/weapi/song/like/get", {"uid": userId});
-    final result = responseVerify(response);
-    if (result.isSuccess) {
-      return (response["ids"] as List).cast();
-    }
-    throw result.errorMsg;
+    return _map(response, (t) {
+      return (t["ids"] as List).cast();
+    });
   }
 
   ///获取用户信息 , 歌单，收藏，mv, dj 数量
-  FutureOr<Map> subCount() async {
-    final response =
-        await doRequest('https://music.163.com/weapi/subcount', {});
-    final result = responseVerify(response);
-    if (result.isSuccess) {
-      return response;
-    }
-    return Future.error(result.errorMsg);
+  FutureOr<Result<Map>> subCount() async {
+    return await doRequest('https://music.163.com/weapi/subcount', {});
   }
 
   ///获取用户创建的电台
-  Future<List<Map>> userDj(int userId) async {
+  Future<Result<List<Map>>> userDj(int userId) async {
     final response = await doRequest(
         'https://music.163.com/weapi/dj/program/$userId',
         {'limit': 30, 'offset': 0});
-    final result = responseVerify(response);
-    if (result.isSuccess) {
-      return (response['programs'] as List).cast();
-    }
-    throw result.errorMsg;
+    return _map(response, (t) {
+      return (t['programs'] as List).cast();
+    });
   }
 
   ///登陆后调用此接口 , 可获取订阅的电台列表
-  Future<List<Map>> djSubList() async {
+  Future<Result<List<Map>>> djSubList() async {
     final response = await doRequest(
         'https://music.163.com/weapi/djradio/get/subed',
         {'total': true, 'offset': 0, 'limit': 30});
-    final result = responseVerify(response);
-    if (result.isSuccess) {
-      return (response['djRadios'] as List).cast();
-    }
-    throw result.errorMsg;
+    return _map(response, (t) {
+      return (t['djRadios'] as List).cast();
+    });
   }
 
   ///获取对应 MV 数据 , 数据包含 mv 名字 , 歌手 , 发布时间 , mv 视频地址等数据
-  Future<Map> mvDetail(int mvId) {
+  Future<Result<Map>> mvDetail(int mvId) {
     return doRequest('https://music.163.com/weapi/mv/detail', {'id': mvId});
   }
 
   ///调用此接口,可收藏 MV
-  Future<void> mvSubscribe(int mvId, bool subscribe) async {
+  Future<bool> mvSubscribe(int mvId, bool subscribe) async {
     final action = subscribe ? 'sub' : 'unsub';
-    final result = responseVerify(await doRequest(
-        'https://music.163.com/weapi/mv/$action',
-        {'mvId': mvId, 'mvIds': '["$mvId"]'}));
-    if (result.isSuccess) {
-      return;
-    }
-    throw result.errorMsg;
+    final result = await doRequest('https://music.163.com/weapi/mv/$action',
+        {'mvId': mvId, 'mvIds': '["$mvId"]'});
+    return result.isValue;
   }
 
   ///获取用户播放记录
   ///type : 0 all , 1 this week
-  Future<Map> getRecord(int uid, int type) {
+  Future<Result<Map>> getRecord(int uid, int type) {
     assert(type == 0 || type == 1);
     return doRequest('https://music.163.com/weapi/v1/play/record',
         {'uid': uid, 'type': type});
   }
 
-  //请求数据
-  Future<Map<String, dynamic>> doRequest(String path, Map data,
-      {EncryptType type = EncryptType.we,
+  Future<Result<Map>> doRequest(String path, Map data,
+      {Crypto crypto = Crypto.we,
       Options options,
       List<Cookie> cookies = const []}) async {
-    debugPrint("netease request path = $path params = ${data.toString()}");
-    //init dio first
-    final dio = await this.dio;
-
-    options ??= Options();
-
-    if (path.contains('music.163.com')) {
-      options.headers["Referer"] = "https://music.163.com";
-    }
-
-    if (type == EncryptType.linux) {
-      data = await _encrypt({
-        "params": data,
-        "url": path.replaceAll(RegExp(r"\w*api"), 'api'),
-        "method": "post",
-      }, EncryptType.linux);
-      options.headers["User-Agent"] =
-          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.90 Safari/537.36";
-      path = "https://music.163.com/api/linux/forward";
-    } else if (type == EncryptType.we) {
-      var cookies = _cookieJar.loadForRequest(Uri.parse(_BASE_URL));
-      var csrfToken =
-          cookies.firstWhere((c) => c.name == "__csrf", orElse: () => null);
-      data["csrf_token"] = csrfToken?.value ?? "";
-
-      data = await _encrypt(data, EncryptType.we);
-      path = path.replaceAll(RegExp(r"\w*api"), 'weapi');
-    }
-    options.headers["Cookie"] = _cookieJar.loadForRequest(Uri.parse(_BASE_URL))
-      ..addAll(cookies);
-    options.headers['Content-Type'] = 'application/x-www-form-urlencoded';
-
     try {
-      Response response = await dio.post(path,
-          data: Transformer.urlEncodeMap(data), options: options);
-      if (response.data is Map) {
-        return response.data;
+      final map = await NeteaseRequestService().doRequest(path, data,
+          crypto: crypto, options: options, cookies: cookies);
+      if (map == null) {
+        return Result.error('请求失败了');
+      } else if (map['code'] == _CODE_NEED_LOGIN) {
+        return Result.error('需要登陆才能访问哦~');
+      } else if (map['code'] != _CODE_SUCCESS) {
+        return Result.error(map['msg'] ?? '请求失败了~');
       }
-      return json.decode(response.data);
-    } on DioError catch (e) {
-      return Future.error(_errorMessages[e.type]);
+      return Result.value(map);
+    } catch (e, stackTrace) {
+      return Result.error(e, stackTrace);
     }
   }
-}
-
-Map<DioErrorType, String> _errorMessages = {
-  DioErrorType.DEFAULT: "连接网络失败,请检查网络后重试",
-  DioErrorType.CANCEL: "访问已取消",
-  DioErrorType.CONNECT_TIMEOUT: "网络连接超时",
-  DioErrorType.RECEIVE_TIMEOUT: "网络响应超时",
-  DioErrorType.RESPONSE: "服务器错误"
-};
-
-const _crypto = const MethodChannel('tech.soit.netease/crypto');
-
-///加密参数
-Future<Map> Function(dynamic, EncryptType) _encrypt = (any, type) async {
-  var arguments = {"json": json.encode(any)};
-  if (type == EncryptType.linux) {
-    arguments["type"] = "linux";
-  }
-  var result = await _crypto.invokeMethod("encrypt", arguments);
-  return result;
-};
-
-enum EncryptType { linux, we }
-
-Map<String, String> _header = {
-  "Referer": "http://music.163.com",
-  "Host": "music.163.com",
-  "User-Agent": _chooseUserAgent(),
-};
-
-const List<String> _USER_AGENT_LIST = [
-  "Mozilla/5.0 (iPhone; CPU iPhone OS 9_1 like Mac OS X) AppleWebKit/601.1.46 (KHTML, like Gecko) Version/9.0 Mobile/13B143 Safari/601.1",
-  "Mozilla/5.0 (iPhone; CPU iPhone OS 9_1 like Mac OS X) AppleWebKit/601.1.46 (KHTML, like Gecko) Version/9.0 Mobile/13B143 Safari/601.1",
-  "Mozilla/5.0 (Linux; Android 5.0; SM-G900P Build/LRX21T) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/59.0.3071.115 Mobile Safari/537.36",
-  "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/59.0.3071.115 Mobile Safari/537.36",
-  "Mozilla/5.0 (Linux; Android 5.1.1; Nexus 6 Build/LYZ28E) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/59.0.3071.115 Mobile Safari/537.36",
-  "Mozilla/5.0 (iPhone; CPU iPhone OS 10_3_2 like Mac OS X) AppleWebKit/603.2.4 (KHTML, like Gecko) Mobile/14F89;GameHelper",
-  "Mozilla/5.0 (iPhone; CPU iPhone OS 10_0 like Mac OS X) AppleWebKit/602.1.38 (KHTML, like Gecko) Version/10.0 Mobile/14A300 Safari/602.1",
-  "Mozilla/5.0 (iPad; CPU OS 10_0 like Mac OS X) AppleWebKit/602.1.38 (KHTML, like Gecko) Version/10.0 Mobile/14A300 Safari/602.1",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.12; rv:46.0) Gecko/20100101 Firefox/46.0",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/59.0.3071.115 Safari/537.36",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_5) AppleWebKit/603.2.4 (KHTML, like Gecko) Version/10.1.1 Safari/603.2.4",
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:46.0) Gecko/20100101 Firefox/46.0",
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36",
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/42.0.2311.135 Safari/537.36 Edge/13.10586"
-];
-
-String _chooseUserAgent({String ua}) {
-  var r = Random();
-  int index;
-  if (ua == 'mobile') {
-    index = (r.nextDouble() * 7).floor();
-  } else if (ua == "pc") {
-    index = (r.nextDouble() * 5).floor() + 8;
-  } else {
-    index = (r.nextDouble() * (_USER_AGENT_LIST.length - 1)).floor();
-  }
-  return _USER_AGENT_LIST[index];
 }
 
 Music mapJsonToMusic(Map song,
