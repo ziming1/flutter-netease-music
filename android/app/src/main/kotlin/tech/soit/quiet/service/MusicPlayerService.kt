@@ -22,7 +22,6 @@ import com.google.android.exoplayer2.source.ExtractorMediaSource
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory
 import com.google.android.exoplayer2.upstream.FileDataSourceFactory
 import com.google.android.exoplayer2.util.Util
-import tech.soit.quiet.player.PlayerPersistence
 import tech.soit.quiet.receiver.BecomingNoisyReceiver
 import tech.soit.quiet.utils.*
 
@@ -33,6 +32,10 @@ import tech.soit.quiet.utils.*
 class MusicPlayerService : MediaBrowserServiceCompat() {
 
     companion object {
+
+        private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" +
+                " (KHTML, like Gecko) Chrome/42.0.2311.135 Safari/537.36 Edge/13.10586"
+
 
         private val audioAttribute = AudioAttributes.Builder()
                 .setContentType(C.CONTENT_TYPE_MUSIC)
@@ -59,8 +62,6 @@ class MusicPlayerService : MediaBrowserServiceCompat() {
     private val notificationManager by lazy { NotificationManagerCompat.from(this) }
 
     private lateinit var mediaController: MediaControllerCompat
-
-    private val playerPersistence by lazy { PlayerPersistence() }
 
     private var isForegroundService = false
 
