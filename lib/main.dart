@@ -10,7 +10,6 @@ import 'package:netease_music_api/netease_cloud_music.dart';
 
 void main() {
   debugDefaultTargetPlatformOverride = TargetPlatform.android;
-  startServer(address: '127.0.0.1', port: 3000);
   final settings = Settings();
   neteaseRepository = NeteaseRepository(settings);
   runApp(MyApp(setting: settings));
